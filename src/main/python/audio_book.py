@@ -9,19 +9,21 @@ from collections import namedtuple
 from PIL import Image
 import pytesseract
 from pdf2image import convert_from_path
-from gtts import gTTS
+from tts.mytts import gTTS
+import music_tag
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 SAVE_AS_TEXT = True
-IMAGE_BASE_PATH = '/mnt/c/Users/gopn/gerrit/ngab/audiobooks'
-lang = namedtuple('lang', ['pdf', 'audio'])
+OUTPUT_BASE_PATH = '/mnt/c/Users/gopn/gerrit/ngab/audiobooks'
+Lang = namedtuple('Lang', ['pdf', 'audio'])
+AudioMeta = namedtuple('audioMeta', ['title', 'author', 'tags'])
 
 
 class Language(Enum):
-    TA = lang('tam', 'ta')
-    EN = lang('eng', 'en')
+    TA = Lang('tam', 'ta')
+    EN = Lang('eng', 'en')
 
     def __str__(self):
         return self.name
@@ -39,12 +41,16 @@ def arg_parser():
     parser.add_argument('--pdf', help='Pdf file', required=True)
     parser.add_argument('--page_range', help='Page number range', required=False, nargs=2, type=int)
     parser.add_argument('--title', help='name of the audio file', required=True)
+    parser.add_argument('--author', help='author', required=True)
+    parser.add_argument('--tags', help='tags', required=True, nargs='+')
     parser.add_argument('--language', help='content language', required=True, type=Language.from_string, choices=list(Language))
+    parser.add_argument('--speed', help='audio speed', required=False, default=0.7, type=float)
+    parser.add_argument('--output', help='output location', required=False, default=OUTPUT_BASE_PATH)
     parser.add_argument('--verbose', help='log verbose', action='store_true')
     return parser.parse_args()
 
 
-def create_page_image(pdf: str, page_range: list, path: str) -> list:
+def create_images_from_page(pdf: str, page_range: list, path: str) -> list:
     logger.debug('creating images be reading pdf file: pdf file->{}, page range->{}, image path->{}'.format(pdf, page_range, path))
     if page_range:
         return convert_from_path(
@@ -63,8 +69,8 @@ def create_page_image(pdf: str, page_range: list, path: str) -> list:
     )
 
 
-def image_path(title: str) -> str:
-    path = os.path.join(IMAGE_BASE_PATH, title)
+def image_path(base_path: str, title: str) -> str:
+    path = os.path.join(base_path, title)
     logger.debug("path: {}".format(path))
     os.makedirs(path, exist_ok=True)
     return path
@@ -86,24 +92,27 @@ def pre_process_content(content: str) -> list:
     content = " ".join(content.splitlines())
     content = re.sub(r'[\\.]{2,}', '.', content)
     content = content.replace('.,', ',')
-    logger.debug("preprocessed content: {}".format(content))
-    return [c + "." for c in content.split('.') if c.strip() ]
+
+    content_list = re.split(r'[.,?]', content)
+    logger.debug("preprocessed content: {}".format(content_list))
+    return [c.strip() + "." for c in content_list if c and c.strip()]
 
 
-def form_audio_file(title: str) -> str:
-    return os.path.join(image_path(title), title+".mp3")
+def form_audio_file(path: str, title: str) -> str:
+    return os.path.join(path, title+".mp3")
 
 
-def form_text_file(title: str) -> str:
-    return os.path.join(image_path(title), title+".txt")
+def form_text_file(path: str, title: str) -> str:
+    return os.path.join(path, title+".txt")
 
 
-def create_audio(contents: list, language: str, audio_file: str) -> None:
-    with open(audio_file, 'wb+') as file:
+def create_audio(contents: list, language: str, audio_file: str, audio_speed: float) -> None:
+    with open(audio_file, 'wb') as file:
         for content in contents:
-            logging.debug("converting audio for the text {}".format(content))
-            engine = gTTS(content, lang=language, lang_check=False)
-            engine.write_to_fp(file)
+            if content:
+                logging.debug("converting audio for the text {}".format(content))
+                engine = gTTS(content, lang=language, lang_check=False)
+                engine.write_to_fp(file)
 
 
 def log_handler(verbose):
@@ -126,26 +135,45 @@ def post_cleanup(path: str):
 
 def create_text_file(file, contents):
     with open(file, 'w+') as f:
-        f.writelines(contents)
+        f.writelines("%s\n" % content for content in contents)
     logger.debug("text file as been created: {}".format(file))
+
+
+def add_audio_meta(audio_file, audio_meta):
+    meta = music_tag.load_file(audio_file)
+    meta['title'] = audio_meta.title
+    meta['artist'] = audio_meta.author
+    meta['genre'] = ','.join(audio_meta.tags)
+    meta.save()
 
 
 def main():
     args = arg_parser()
     log_handler(args.verbose)
     logger.debug("input args: {}".format(args))
+
     language = args.language.value
-    pages = create_page_image(args.pdf, args.page_range, image_path(args.title))
-    contents = get_page_contents(pages, language.pdf)
-    processed_contents = pre_process_content(contents)
-    if SAVE_AS_TEXT:
-        create_text_file(form_text_file(args.title), contents)
-    audio_file = form_audio_file(args.title)
-    create_audio(processed_contents, language.audio, audio_file)
-    logger.info('audio book {} has been created successfully'.format(audio_file))
-    post_cleanup(image_path(args.title))
+    audio_meta = AudioMeta(args.title, args.author, args.tags)
+    output_path = image_path(args.output, audio_meta.title)
+    text_file = form_text_file(output_path, audio_meta.title)
+    audio_file = form_audio_file(output_path, audio_meta.title)
+    try:
+        pages = create_images_from_page(args.pdf, args.page_range, output_path)
+        contents = get_page_contents(pages, language.pdf)
+        processed_contents = pre_process_content(contents)
+        if SAVE_AS_TEXT:
+            create_text_file(text_file, processed_contents)
+
+        create_audio(processed_contents, language.audio, audio_file, args.speed)
+        add_audio_meta(audio_file, audio_meta)
+        logger.info('audio book {} has been created successfully'.format(audio_file))
+    except Exception:
+        logger.exception("Error while creating story audio")
+    finally:
+        post_cleanup(output_path)
 
 
 if __name__ == '__main__':
     main()
+    #add_audio_meta("/Users/gopn/Music/Villain Theme.mp3", AudioMeta(title='test', author='test1', tags=['tes'], ))
 
