@@ -1,14 +1,19 @@
+
+# tts libs
 pyttsx3==2.90
 gTTS==2.1.1
+
 pyPDF2==1.26.0
 pyPDF4==1.27.0
 pdfrw==0.4
 textract==1.6.3
 pdfplumber
 pdfminer.six==20200726
+
+# pdf libs
 pytesseract==0.3.6
 pdf2image==1.14.0
 Pillow==7.2.0
 
-#music tag
-music-tag==0.3.2
+#audio libs
+pydub==0.24.1

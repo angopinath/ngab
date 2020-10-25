@@ -9,8 +9,8 @@ pip3 install pyb
 pyb
 ```
 
-## install teseract ocr
+## install required packages
 
 ```shell script
-apt-get install tesseract-ocr tesseract-ocr-tam tesseract-ocr-script-tam poppler-utils -y
+apt-get install ffmpeg tesseract-ocr tesseract-ocr-tam tesseract-ocr-script-tam poppler-utils -y
 ```

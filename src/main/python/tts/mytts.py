@@ -13,7 +13,7 @@ __all__ = ['gTTS', 'gTTSError']
 
 # Logger
 log = logging.getLogger(__name__)
-log.addHandler(logging.NullHandler())
+#log.addHandler(logging.NullHandler())
 
 
 class Speed:
@@ -146,6 +146,12 @@ class gTTS:
         # Google Translate token
         self.token = gtts_token.Token()
 
+    def _tokenize_list(self, text):
+        tokn = []
+        for t in text:
+            tokn += self._tokenize(t)
+        return tokn
+
     def _tokenize(self, text):
         # Pre-clean
         text = text.strip()
@@ -180,7 +186,7 @@ class gTTS:
         # TTS API URL
         translate_url = _translate_url(tld=self.tld, path="translate_tts")
 
-        text_parts = self._tokenize(self.text)
+        text_parts = self._tokenize_list(self.text)
         log.debug("text_parts: %i", len(text_parts))
         assert text_parts, 'No text to send to TTS API'
 

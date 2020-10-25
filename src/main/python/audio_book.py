@@ -10,7 +10,7 @@ from PIL import Image
 import pytesseract
 from pdf2image import convert_from_path
 from tts.mytts import gTTS
-import music_tag
+from pydub.audio_segment import AudioSegment
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -18,7 +18,7 @@ logger.setLevel(logging.INFO)
 SAVE_AS_TEXT = True
 OUTPUT_BASE_PATH = '/mnt/c/Users/gopn/gerrit/ngab/audiobooks'
 Lang = namedtuple('Lang', ['pdf', 'audio'])
-AudioMeta = namedtuple('audioMeta', ['title', 'author', 'tags'])
+AudioMeta = namedtuple('audioMeta', ['title', 'album', 'author', 'genre'])
 
 
 class Language(Enum):
@@ -41,8 +41,9 @@ def arg_parser():
     parser.add_argument('--pdf', help='Pdf file', required=True)
     parser.add_argument('--page_range', help='Page number range', required=False, nargs=2, type=int)
     parser.add_argument('--title', help='name of the audio file', required=True)
+    parser.add_argument('--album', help='album', required=True)
     parser.add_argument('--author', help='author', required=True)
-    parser.add_argument('--tags', help='tags', required=True, nargs='+')
+    parser.add_argument('--genre', help='genre', required=True, nargs='+')
     parser.add_argument('--language', help='content language', required=True, type=Language.from_string, choices=list(Language))
     parser.add_argument('--speed', help='audio speed', required=False, default=0.7, type=float)
     parser.add_argument('--output', help='output location', required=False, default=OUTPUT_BASE_PATH)
@@ -93,8 +94,7 @@ def pre_process_content(content: str) -> list:
     content = re.sub(r'[\\.]{2,}', '.', content)
     content = content.replace('.,', ',')
 
-    content_list = re.split(r'[.,?]', content)
-    logger.debug("preprocessed content: {}".format(content_list))
+    content_list = re.split(r'[.,-]', content)
     return [c.strip() + "." for c in content_list if c and c.strip()]
 
 
@@ -107,12 +107,12 @@ def form_text_file(path: str, title: str) -> str:
 
 
 def create_audio(contents: list, language: str, audio_file: str, audio_speed: float) -> None:
+    contents_sub_list = [contents[i:i + 50] for i in range(0, len(contents), 50)]
     with open(audio_file, 'wb') as file:
-        for content in contents:
-            if content:
-                logging.debug("converting audio for the text {}".format(content))
-                engine = gTTS(content, lang=language, lang_check=False)
-                engine.write_to_fp(file)
+        for i, sub_list in enumerate(contents_sub_list):
+            engine = gTTS(sub_list, lang=language, lang_check=False, tld='com', speed=audio_speed)
+            logger.debug("{}, {}".format(i, len(engine.get_urls())))
+            engine.write_to_fp(file)
 
 
 def log_handler(verbose):
@@ -140,11 +140,9 @@ def create_text_file(file, contents):
 
 
 def add_audio_meta(audio_file, audio_meta):
-    meta = music_tag.load_file(audio_file)
-    meta['title'] = audio_meta.title
-    meta['artist'] = audio_meta.author
-    meta['genre'] = ','.join(audio_meta.tags)
-    meta.save()
+    meta = AudioSegment.from_mp3(audio_file)
+    meta.export(audio_file, format='mp3', tags={'title': audio_meta.title, 'album': audio_meta.album, 'artist': audio_meta.author, 'genre': ','.join(audio_meta.genre)})
+    logger.debug('audio file meta data has been modified')
 
 
 def main():
@@ -153,7 +151,7 @@ def main():
     logger.debug("input args: {}".format(args))
 
     language = args.language.value
-    audio_meta = AudioMeta(args.title, args.author, args.tags)
+    audio_meta = AudioMeta(args.title, args.album, args.author, args.genre)
     output_path = image_path(args.output, audio_meta.title)
     text_file = form_text_file(output_path, audio_meta.title)
     audio_file = form_audio_file(output_path, audio_meta.title)
@@ -161,6 +159,7 @@ def main():
         pages = create_images_from_page(args.pdf, args.page_range, output_path)
         contents = get_page_contents(pages, language.pdf)
         processed_contents = pre_process_content(contents)
+        logger.debug("preprocessed content: {}".format(processed_contents))
         if SAVE_AS_TEXT:
             create_text_file(text_file, processed_contents)
 
@@ -175,5 +174,5 @@ def main():
 
 if __name__ == '__main__':
     main()
-    #add_audio_meta("/Users/gopn/Music/Villain Theme.mp3", AudioMeta(title='test', author='test1', tags=['tes'], ))
+    #add_audio_meta("/Users/gopn/gerrit/ngab/audiobooks/Aysha/Aysha.mp3", AudioMeta(title='test', author='test1', genre=['tes']))
 
